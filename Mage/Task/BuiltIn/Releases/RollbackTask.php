@@ -23,12 +23,6 @@ use Mage\Task\Releases\RollbackAware;
  */
 class RollbackTask extends AbstractTask implements IsReleaseAware
 {
-	/**
-	 * The Relase ID to Rollback To
-	 * @var integer
-	 */
-    protected $release = null;
-
     /**
      * (non-PHPdoc)
      * @see \Mage\Task\AbstractTask::getName()
@@ -39,23 +33,12 @@ class RollbackTask extends AbstractTask implements IsReleaseAware
     }
 
     /**
-     * Sets the Release ID to Rollback To
-     * @param integer $releaseId
-     * @return \Mage\Task\BuiltIn\Releases\RollbackTask
-     */
-    public function setRelease($releaseId)
-    {
-        $this->release = $releaseId;
-        return $this;
-    }
-
-    /**
      * Gets the Release ID to Rollback To
      * @return integer
      */
-    public function getRelease()
+    public function getReleaseId()
     {
-        return $this->release;
+        return $this->getConfig()->getReleaseId();
     }
 
     /**
@@ -77,31 +60,39 @@ class RollbackTask extends AbstractTask implements IsReleaseAware
 
             } else {
                 rsort($releases);
+                $deleteCurrent = $this->getConfig()->getParameter('deleteCurrent', false);
 
                 $releaseIsAvailable = false;
-                if ($this->getRelease() == '') {
+                if ($this->getReleaseId() == '') {
                     $releaseId = $releases[0];
                     $releaseIsAvailable = true;
 
-                } else if ($this->getRelease() <= 0) {
-                    $index = $this->getRelease() * -1;
+                } else if ($this->getReleaseId() <= 0) {
+                    $index = $this->getReleaseId() * -1;
                     if (isset($releases[$index])) {
                         $releaseId = $releases[$index];
                         $releaseIsAvailable = true;
                     }
                 } else {
-                    if (in_array($this->getRelease(), $releases)) {
-                        $releaseId = $this->getRelease();
+                    if (in_array($this->getReleaseId(), $releases)) {
+                        $releaseId = $this->getReleaseId();
                         $releaseIsAvailable = true;
                     }
                 }
 
                 if (!$releaseIsAvailable) {
-                    Console::output('Release <dark_gray>' . $this->getRelease() . '</dark_gray> is invalid or unavailable for <dark_gray>' . $this->getConfig()->getHost() . '</dark_gray> ... <red>FAIL</red>');
+                    Console::output('Release <dark_gray>' . $this->getReleaseId() . '</dark_gray> is invalid or unavailable for <dark_gray>' . $this->getConfig()->getHost() . '</dark_gray> ... <red>FAIL</red>');
 
                 } else {
                     Console::output('Rollback release on <dark_gray>' . $this->getConfig()->getHost() . '</dark_gray>');
                     $rollbackTo = $releasesDirectory . '/' . $releaseId;
+
+                    // Get Current Release
+                    if ($deleteCurrent) {
+                        $result = $this->runCommandRemote('ls -l ' . $symlink, $output) && $result;
+                        $currentRelease = explode('/', $output);
+                        $currentRelease = trim(array_pop($currentRelease));
+                    }
 
                     // Tasks
                     $tasks = 1;
@@ -116,6 +107,7 @@ class RollbackTask extends AbstractTask implements IsReleaseAware
                         Console::output('Running <purple>' . $task->getName() . '</purple> ... ', 2, false);
 
                         if ($task instanceOf RollbackAware) {
+                            /* @var $task AbstractTask */
                             $tasks++;
                             $result = $task->run();
 
@@ -140,7 +132,7 @@ class RollbackTask extends AbstractTask implements IsReleaseAware
                              . 'ln -sf ' . $rollbackTo . ' ' . $symlink;
 
                     if ($resultFetch) {
-                	    $command .= ' && chown -h ' . $userGroup . ' ' . $symlink;
+                        $command .= ' && chown -h ' . $userGroup . ' ' . $symlink;
                     }
 
                     $result = $this->runCommandRemote($command);
@@ -148,6 +140,11 @@ class RollbackTask extends AbstractTask implements IsReleaseAware
                     if ($result) {
                         Console::output('<green>OK</green>', 0);
                         $completedTasks++;
+
+                        // Delete Old Current Release
+                        if ($deleteCurrent && $currentRelease) {
+                            $this->runCommandRemote('rm -rf ' . $releasesDirectory . '/' . $currentRelease, $output);
+                        }
                     } else {
                         Console::output('<red>FAIL</red>', 0);
                     }
@@ -155,24 +152,25 @@ class RollbackTask extends AbstractTask implements IsReleaseAware
                     // Run Post Release Tasks
                     $tasksToRun = $this->getConfig()->getTasks(AbstractTask::STAGE_POST_DEPLOY);
                     foreach ($tasksToRun as $taskData) {
-                    	$task = Factory::get($taskData, $this->getConfig(), true, self::STAGE_POST_DEPLOY);
-                    	$task->init();
-                    	Console::output('Running <purple>' . $task->getName() . '</purple> ... ', 2, false);
+                        $task = Factory::get($taskData, $this->getConfig(), true, self::STAGE_POST_DEPLOY);
+                        $task->init();
+                        Console::output('Running <purple>' . $task->getName() . '</purple> ... ', 2, false);
 
-                    	if ($task instanceOf RollbackAware) {
-                    		$tasks++;
-                    		$result = $task->run();
+                        if ($task instanceOf RollbackAware) {
+                            /* @var $task AbstractTask */
+                            $tasks++;
+                            $result = $task->run();
 
-                    		if ($result == true) {
-                    			Console::output('<green>OK</green>', 0);
-                    			$completedTasks++;
-                    		} else {
-                    			Console::output('<red>FAIL</red>', 0);
-                    		}
-                    	} else {
-                    		Console::output('<yellow>SKIPPED</yellow>', 0);
-                    	}
-                	}
+                            if ($result == true) {
+                                Console::output('<green>OK</green>', 0);
+                                $completedTasks++;
+                            } else {
+                                Console::output('<red>FAIL</red>', 0);
+                            }
+                        } else {
+                            Console::output('<yellow>SKIPPED</yellow>', 0);
+                        }
+                    }
 
                     if ($completedTasks == $tasks) {
                         $tasksColor = 'green';

@@ -48,23 +48,20 @@ class Factory
         $taskName = str_replace(' ', '', $taskName);
 
         if (strpos($taskName, '/') === false) {
-            Autoload::loadUserTask($taskName);
-            $className = 'Task\\' . ucfirst($taskName);
+            $className = 'Task\\' . $taskName;
 
         } else {
-            $taskName = str_replace(' ', '\\', ucwords(str_replace('/', ' ', $taskName)));
-            $className = 'Mage\\Task\\BuiltIn\\' . $taskName . 'Task';
+            $className = 'Mage\\Task\\BuiltIn\\' . str_replace(' ', '\\', ucwords(str_replace('/', ' ', $taskName))) . 'Task';
         }
 
-
-        if (class_exists($className) || Autoload::isLoadable($className)) {
-        	$instance = new $className($taskConfig, $inRollback, $stage, $taskParameters);
-        } else {
-        	throw new ErrorWithMessageException('The Task "' . $taskName . '" doesn\'t exists.');
+        if (!class_exists($className)) {
+            throw new Exception('Task "' . $taskName . '" not found.');
         }
 
-        if (!($instance instanceOf AbstractTask)) {
-        	throw new Exception('The Task ' . $taskName . ' must be an instance of Mage\Task\AbstractTask.');
+        $instance = new $className($taskConfig, $inRollback, $stage, $taskParameters);
+
+        if (!is_a($instance, 'Mage\Task\AbstractTask')) {
+            throw new Exception('The Task ' . $taskName . ' must be an instance of Mage\Task\AbstractTask.');
         }
 
         return $instance;

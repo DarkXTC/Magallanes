@@ -10,6 +10,7 @@
 
 namespace Mage\Task\BuiltIn\Deployment\Strategy;
 
+use Mage\Console;
 use Mage\Task\BuiltIn\Deployment\Strategy\BaseStrategyTaskAbstract;
 use Mage\Task\Releases\IsReleaseAware;
 
@@ -20,10 +21,10 @@ use Mage\Task\Releases\IsReleaseAware;
  */
 class RsyncTask extends BaseStrategyTaskAbstract implements IsReleaseAware
 {
-	/**
-	 * (non-PHPdoc)
-	 * @see \Mage\Task\AbstractTask::getName()
-	 */
+    /**
+     * (non-PHPdoc)
+     * @see \Mage\Task\AbstractTask::getName()
+     */
     public function getName()
     {
         if ($this->getConfig()->release('enabled', false) == true) {
@@ -31,14 +32,14 @@ class RsyncTask extends BaseStrategyTaskAbstract implements IsReleaseAware
                 return 'Deploy via Rsync (with Releases override) [built-in]';
             } else {
                 $rsync_copy = $this->getConfig()->deployment("rsync");
-                if ( $rsync_copy && is_array($rsync_copy) && $rsync_copy['copy'] ) {
+                if ($rsync_copy && is_array($rsync_copy) && $rsync_copy['copy']) {
                     return 'Deploy via Rsync (with Releases) [built-in, incremental]';
                 } else {
                     return 'Deploy via Rsync (with Releases) [built-in]';
                 }
             }
         } else {
-                return 'Deploy via Rsync [built-in]';
+            return 'Deploy via Rsync [built-in]';
         }
     }
 
@@ -62,6 +63,8 @@ class RsyncTask extends BaseStrategyTaskAbstract implements IsReleaseAware
             $deployToDirectory = rtrim($this->getConfig()->deployment('to'), '/')
                                . '/' . $releasesDirectory
                                . '/' . $this->getConfig()->getReleaseId();
+
+            Console::log('Deploy to ' . $deployToDirectory);
             $resultFetch = $this->runCommandRemote('ls -ld ' . $symlink . ' | cut -d"/" -f2', $currentRelease);
 
             if ($resultFetch && $currentRelease) {
@@ -69,10 +72,10 @@ class RsyncTask extends BaseStrategyTaskAbstract implements IsReleaseAware
                 // rsync: { copy: yes }
                 $rsync_copy = $this->getConfig()->deployment('rsync');
                 // If copy_tool_rsync, use rsync rather than cp for finer control of what is copied
-                if ( $rsync_copy && is_array($rsync_copy) && $rsync_copy['copy'] && isset($rsync_copy['copy_tool_rsync']) ) {
+                if ($rsync_copy && is_array($rsync_copy) && $rsync_copy['copy'] && isset($rsync_copy['copy_tool_rsync'])) {
                     $this->runCommandRemote("rsync -a {$this->excludes(array_merge($excludes, $rsync_copy['rsync_excludes']))} "
-                    . "$releasesDirectory/$currentRelease/ $releasesDirectory/{$this->getConfig()->getReleaseId()}");
-                } elseif ( $rsync_copy && is_array($rsync_copy) && $rsync_copy['copy'] ) {
+                                          . "$releasesDirectory/$currentRelease/ $releasesDirectory/{$this->getConfig()->getReleaseId()}");
+                } elseif ($rsync_copy && is_array($rsync_copy) && $rsync_copy['copy']) {
                     $this->runCommandRemote('cp -R ' . $releasesDirectory . '/' . $currentRelease . ' ' . $releasesDirectory . '/' . $this->getConfig()->getReleaseId());
                 } else {
                     $this->runCommandRemote('mkdir -p ' . $releasesDirectory . '/' . $this->getConfig()->getReleaseId());
@@ -80,48 +83,21 @@ class RsyncTask extends BaseStrategyTaskAbstract implements IsReleaseAware
             }
         }
 
+        // Strategy Flags
+        $strategyFlags = $this->getConfig()->deployment('strategy_flags', $this->getConfig()->general('strategy_flags', array()));
+        if (isset($strategyFlags['rsync'])) {
+            $strategyFlags = $strategyFlags['rsync'];
+        } else {
+            $strategyFlags = '';
+        }
+
         $command = 'rsync -avz '
+                 . $strategyFlags . ' '
                  . '--rsh="ssh ' . $this->getConfig()->getHostIdentityFileOption() . '-p' . $this->getConfig()->getHostPort() . '" '
                  . $this->excludes($excludes) . ' '
                  . $this->getConfig()->deployment('from') . ' '
                  . $this->getConfig()->deployment('user') . '@' . $this->getConfig()->getHostName() . ':' . $deployToDirectory;
-
         $result = $this->runCommandLocal($command);
-
-        // Count Releases
-        if ($this->getConfig()->release('enabled', false) == true) {
-            $releasesDirectory = $this->getConfig()->release('directory', 'releases');
-            $symlink = $this->getConfig()->release('symlink', 'current');
-
-            if (substr($symlink, 0, 1) == '/') {
-                $releasesDirectory = rtrim($this->getConfig()->deployment('to'), '/') . '/' . $releasesDirectory;
-            }
-
-            $maxReleases = $this->getConfig()->release('max', false);
-            if (($maxReleases !== false) && ($maxReleases > 0)) {
-                $releasesList = '';
-                $countReleasesFetch = $this->runCommandRemote('ls -1 ' . $releasesDirectory, $releasesList);
-                $releasesList = trim($releasesList);
-
-                if ($countReleasesFetch && $releasesList != '') {
-                    $releasesList = explode(PHP_EOL, $releasesList);
-                    if (count($releasesList) > $maxReleases) {
-                        $releasesToDelete = array_diff($releasesList, array($this->getConfig()->getReleaseId()));
-                        sort($releasesToDelete);
-                        $releasesToDeleteCount = count($releasesToDelete) - $maxReleases;
-                        $releasesToDelete = array_slice($releasesToDelete, 0, $releasesToDeleteCount + 1);
-
-                        foreach ($releasesToDelete as $releaseIdToDelete) {
-                            $directoryToDelete = $releasesDirectory . '/' . $releaseIdToDelete;
-                            if ($directoryToDelete != '/') {
-                                $command = 'rm -rf ' . $directoryToDelete;
-                                $result = $result && $this->runCommandRemote($command);
-                            }
-                        }
-                    }
-                }
-            }
-        }
 
         return $result;
     }

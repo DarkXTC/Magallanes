@@ -10,6 +10,7 @@
 
 namespace Mage\Task\BuiltIn\Deployment\Strategy;
 
+use Mage\Console;
 use Mage\Task\BuiltIn\Deployment\Strategy\BaseStrategyTaskAbstract;
 use Mage\Task\Releases\IsReleaseAware;
 
@@ -20,10 +21,10 @@ use Mage\Task\Releases\IsReleaseAware;
  */
 class TarGzTask extends BaseStrategyTaskAbstract implements IsReleaseAware
 {
-	/**
-	 * (non-PHPdoc)
-	 * @see \Mage\Task\AbstractTask::getName()
-	 */
+    /**
+     * (non-PHPdoc)
+     * @see \Mage\Task\AbstractTask::getName()
+     */
     public function getName()
     {
         if ($this->getConfig()->release('enabled', false) == true) {
@@ -33,7 +34,7 @@ class TarGzTask extends BaseStrategyTaskAbstract implements IsReleaseAware
                 return 'Deploy via TarGz (with Releases) [built-in]';
             }
         } else {
-                return 'Deploy via TarGz [built-in]';
+            return 'Deploy via TarGz [built-in]';
         }
     }
 
@@ -51,11 +52,11 @@ class TarGzTask extends BaseStrategyTaskAbstract implements IsReleaseAware
         $deployToDirectory = $this->getConfig()->deployment('to');
         if ($this->getConfig()->release('enabled', false) == true) {
             $releasesDirectory = $this->getConfig()->release('directory', 'releases');
-
             $deployToDirectory = rtrim($this->getConfig()->deployment('to'), '/')
-                               . '/' . $releasesDirectory
-                               . '/' . $this->getConfig()->getReleaseId();
-            $this->runCommandRemote('mkdir -p ' . $releasesDirectory . '/' . $this->getConfig()->getReleaseId());
+                . '/' . $releasesDirectory
+                . '/' . $this->getConfig()->getReleaseId();
+            $output = null;
+            $this->runCommandRemote('mkdir -p ' . $deployToDirectory, $output, false);
         }
 
         // Create Tar Gz
@@ -66,74 +67,49 @@ class TarGzTask extends BaseStrategyTaskAbstract implements IsReleaseAware
             $excludeCmd .= ' --exclude=' . $excludeFile;
         }
 
-        $command = 'tar cfz ' . $localTarGz . '.tar.gz ' . $excludeCmd . ' ' . $this->getConfig()->deployment('from');
+        // Strategy Flags
+        $strategyFlags = $this->getConfig()->deployment('strategy_flags', $this->getConfig()->general('strategy_flags', array()));
+        if (isset($strategyFlags['targz']) && isset($strategyFlags['targz']['create'])) {
+            $strategyFlags = $strategyFlags['targz']['create'];
+        } else {
+            $strategyFlags = '';
+        }
+
+        $command = 'tar cfzh' . $strategyFlags . ' ' . $localTarGz . '.tar.gz ' . $excludeCmd . ' -C ' . $this->getConfig()->deployment('from') . ' .';
         $result = $this->runCommandLocal($command);
 
+        // Strategy Flags
+        $strategyFlags = $this->getConfig()->deployment('strategy_flags', $this->getConfig()->general('strategy_flags', array()));
+        if (isset($strategyFlags['targz']) && isset($strategyFlags['targz']['exctract'])) {
+            $strategyFlags = $strategyFlags['targz']['exctract'];
+        } else {
+            $strategyFlags = '';
+        }
+
         // Copy Tar Gz  to Remote Host
-        $command = 'scp ' . $this->getConfig()->getHostIdentityFileOption() . '-P ' . $this->getConfig()->getHostPort() . ' ' . $localTarGz . '.tar.gz '
+        $command = 'scp ' . $strategyFlags . ' ' . $this->getConfig()->getHostIdentityFileOption() . '-P ' . $this->getConfig()->getHostPort() . ' ' . $localTarGz . '.tar.gz '
                  . $this->getConfig()->deployment('user') . '@' . $this->getConfig()->getHostName() . ':' . $deployToDirectory;
         $result = $this->runCommandLocal($command) && $result;
 
-        // Extract Tar Gz
-        if ($this->getConfig()->release('enabled', false) == true) {
-        	$releasesDirectory = $this->getConfig()->release('directory', 'releases');
-
-        	$deployToDirectory = $releasesDirectory . '/' . $this->getConfig()->getReleaseId();
-        	$command = 'cd ' . $deployToDirectory . ' && tar xfz ' . $remoteTarGz . '.tar.gz';
+        // Strategy Flags
+        $strategyFlags = $this->getConfig()->deployment('strategy_flags', $this->getConfig()->general('strategy_flags', array()));
+        if (isset($strategyFlags['targz']) && isset($strategyFlags['targz']['scp'])) {
+            $strategyFlags = $strategyFlags['targz']['scp'];
         } else {
-        	$command = 'tar xfz ' . $remoteTarGz . '.tar.gz';
+            $strategyFlags = '';
         }
+
+        // Extract Tar Gz
+        $command = $this->getReleasesAwareCommand('tar xfz' . $strategyFlags . ' ' . $remoteTarGz . '.tar.gz');
         $result = $this->runCommandRemote($command) && $result;
 
         // Delete Tar Gz from Remote Host
-        if ($this->getConfig()->release('enabled', false) == true) {
-        	$releasesDirectory = $this->getConfig()->release('directory', 'releases');
-
-        	$deployToDirectory = $releasesDirectory . '/' . $this->getConfig()->getReleaseId();
-        	$command = 'rm ' . $deployToDirectory . '/' . $remoteTarGz . '.tar.gz';
-        } else {
-        	$command = 'rm ' . $remoteTarGz . '.tar.gz';
-        }
+        $command = $this->getReleasesAwareCommand('rm ' . $remoteTarGz . '.tar.gz');
         $result = $this->runCommandRemote($command) && $result;
 
         // Delete Tar Gz from Local
         $command = 'rm ' . $localTarGz . ' ' . $localTarGz . '.tar.gz';
         $result = $this->runCommandLocal($command) && $result;
-
-        // Count Releases
-        if ($this->getConfig()->release('enabled', false) == true) {
-            $releasesDirectory = $this->getConfig()->release('directory', 'releases');
-            $symlink = $this->getConfig()->release('symlink', 'current');
-
-            if (substr($symlink, 0, 1) == '/') {
-                $releasesDirectory = rtrim($this->getConfig()->deployment('to'), '/') . '/' . $releasesDirectory;
-            }
-
-            $maxReleases = $this->getConfig()->release('max', false);
-            if (($maxReleases !== false) && ($maxReleases > 0)) {
-                $releasesList = '';
-                $countReleasesFetch = $this->runCommandRemote('ls -1 ' . $releasesDirectory, $releasesList);
-                $releasesList = trim($releasesList);
-
-                if ($countReleasesFetch && $releasesList != '') {
-                    $releasesList = explode(PHP_EOL, $releasesList);
-                    if (count($releasesList) > $maxReleases) {
-                        $releasesToDelete = array_diff($releasesList, array($this->getConfig()->getReleaseId()));
-                        sort($releasesToDelete);
-                        $releasesToDeleteCount = count($releasesToDelete) - $maxReleases;
-                        $releasesToDelete = array_slice($releasesToDelete, 0, $releasesToDeleteCount + 1);
-
-                        foreach ($releasesToDelete as $releaseIdToDelete) {
-                            $directoryToDelete = $releasesDirectory . '/' . $releaseIdToDelete;
-                            if ($directoryToDelete != '/') {
-                                $command = 'rm -rf ' . $directoryToDelete;
-                                $result = $result && $this->runCommandRemote($command);
-                            }
-                        }
-                    }
-                }
-            }
-        }
 
         return $result;
     }

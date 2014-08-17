@@ -21,10 +21,10 @@ use Mage\Task\Releases\SkipOnOverride;
  */
 class ReleaseTask extends AbstractTask implements IsReleaseAware, SkipOnOverride
 {
-	/**
-	 * (non-PHPdoc)
-	 * @see \Mage\Task\AbstractTask::getName()
-	 */
+    /**
+     * (non-PHPdoc)
+     * @see \Mage\Task\AbstractTask::getName()
+     */
     public function getName()
     {
         return 'Releasing [built-in]';
@@ -36,6 +36,7 @@ class ReleaseTask extends AbstractTask implements IsReleaseAware, SkipOnOverride
      */
     public function run()
     {
+        $resultFetch = false;
         if ($this->getConfig()->release('enabled', false) == true) {
             $releasesDirectory = $this->getConfig()->release('directory', 'releases');
             $symlink = $this->getConfig()->release('symlink', 'current');
@@ -44,27 +45,54 @@ class ReleaseTask extends AbstractTask implements IsReleaseAware, SkipOnOverride
                 $releasesDirectory = rtrim($this->getConfig()->deployment('to'), '/') . '/' . $releasesDirectory;
             }
 
-            $currentCopy = $releasesDirectory . '/' . $this->getConfig()->getReleaseId();
+            $releaseId = $this->getConfig()->getReleaseId();
 
+            $currentCopy = $releasesDirectory . '/' . $releaseId;
+
+            //Check if target user:group is specified
+            $userGroup = $this->getConfig()->deployment('owner');
             // Fetch the user and group from base directory; defaults usergroup to 33:33
-            $userGroup = '';
-            $resultFetch = $this->runCommandRemote('ls -ld . | awk \'{print \$3":"\$4}\'', $userGroup);
+            if (empty($userGroup)) {
+                $user = '33';
+                $group = '33';
+                $directoryInfos = '';
+                // Get raw directory info and parse it in php.
+                // "stat" command don't behave the same on different systems, ls output format also varies
+                // and awk parameters need special care depending on the executing shell
+                $resultFetch = $this->runCommandRemote("ls -ld .", $directoryInfos);
+                if (!empty($directoryInfos)) {
+                    //uniformize format as it depends on the system deployed on
+                    $directoryInfos = trim(str_replace(array("  ", "\t"), ' ', $directoryInfos));
+                    $infoArray = explode(' ', $directoryInfos);
+                    if (!empty($infoArray[2])) {
+                        $user = $infoArray[2];
+                    }
+                    if (!empty($infoArray[3])) {
+                        $group = $infoArray[3];
+                    }
+                    $userGroup = $user . ':' . $group;
+                }
+            }
 
             // Remove symlink if exists; create new symlink and change owners
             $command = 'rm -f ' . $symlink
-                     . ' ; '
-                     . 'ln -sf ' . $currentCopy . ' ' . $symlink;
+                . ' ; '
+                . 'ln -sf ' . $currentCopy . ' ' . $symlink;
 
             if ($resultFetch && $userGroup != '') {
-            	$command .= ' && '
-                          . 'chown -h ' . $userGroup . ' ' . $symlink
-                          . ' && '
-                          . 'chown -R ' . $userGroup . ' ' . $currentCopy
-                          . ' && '
-                          . 'chown ' . $userGroup . ' ' . $releasesDirectory;
+                $command .= ' && '
+                    . 'chown -h ' . $userGroup . ' ' . $symlink
+                    . ' && '
+                    . 'chown -R ' . $userGroup . ' ' . $currentCopy
+                    . ' && '
+                    . 'chown ' . $userGroup . ' ' . $releasesDirectory;
             }
 
             $result = $this->runCommandRemote($command);
+
+            if ($result) {
+                $this->cleanUpReleases();
+            }
 
             return $result;
 
@@ -73,4 +101,44 @@ class ReleaseTask extends AbstractTask implements IsReleaseAware, SkipOnOverride
         }
     }
 
+    /**
+     * Removes old releases
+     */
+    protected function cleanUpReleases()
+    {
+        // Count Releases
+        if ($this->getConfig()->release('enabled', false) == true) {
+            $releasesDirectory = $this->getConfig()->release('directory', 'releases');
+            $symlink = $this->getConfig()->release('symlink', 'current');
+
+            if (substr($symlink, 0, 1) == '/') {
+                $releasesDirectory = rtrim($this->getConfig()->deployment('to'), '/') . '/' . $releasesDirectory;
+            }
+
+            $maxReleases = $this->getConfig()->release('max', false);
+            if (($maxReleases !== false) && ($maxReleases > 0)) {
+                $releasesList = '';
+                $countReleasesFetch = $this->runCommandRemote('ls -1 ' . $releasesDirectory, $releasesList);
+                $releasesList = trim($releasesList);
+
+                if ($countReleasesFetch && $releasesList != '') {
+                    $releasesList = explode(PHP_EOL, $releasesList);
+                    if (count($releasesList) > $maxReleases) {
+                        $releasesToDelete = array_diff($releasesList, array($this->getConfig()->getReleaseId()));
+                        sort($releasesToDelete);
+                        $releasesToDeleteCount = count($releasesToDelete) - $maxReleases;
+                        $releasesToDelete = array_slice($releasesToDelete, 0, $releasesToDeleteCount + 1);
+
+                        foreach ($releasesToDelete as $releaseIdToDelete) {
+                            $directoryToDelete = $releasesDirectory . '/' . $releaseIdToDelete;
+                            if ($directoryToDelete != '/') {
+                                $command = 'rm -rf ' . $directoryToDelete;
+                                $this->runCommandRemote($command);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

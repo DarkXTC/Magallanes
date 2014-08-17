@@ -17,37 +17,56 @@ namespace Mage;
  */
 class Autoload
 {
-	/**
-	 * Autoload a Class by it's Class Name
-	 * @param string $className
-	 */
-    public static function autoload($className)
-    {
-        $baseDir = dirname(dirname(__FILE__));
-        $classFile = $baseDir . '/' . str_replace(array('_', '\\'), '/', $className . '.php');
-        require_once $classFile;
-    }
-
     /**
-     * Checks if a Class can be loaded.
+     * Autoload a Class by it's Class Name
      * @param string $className
      * @return boolean
      */
-    public static function isLoadable($className)
+    public function autoLoad($className)
     {
-        $baseDir = dirname(dirname(__FILE__));
-        $classFile = $baseDir . '/' . str_replace(array('_', '\\'), '/', $className . '.php');
-        return (file_exists($classFile) && is_readable($classFile));
+        $className = ltrim($className, '/');
+        $postfix = '/' . str_replace(array('_', '\\'), '/', $className . '.php');
+
+        // Change BaseDir according to Namespace
+        if (strpos($className, 'Task\\') === 0) {
+            $baseDir = getcwd() . '/.mage/tasks';
+            $postfix = substr($postfix, 5);
+
+        } else if (strpos($className, 'Command\\') === 0) {
+            $baseDir = getcwd() . '/.mage/commands';
+            $postfix = substr($postfix, 8);
+
+        } else {
+            $baseDir = dirname(dirname(__FILE__));
+        }
+
+        //Try to load a normal Mage class (or Task). Think that Mage component is compiled to .phar
+        $classFileWithinPhar = $baseDir . $postfix;
+        if ($this->isReadable($classFileWithinPhar)) {
+            /** @noinspection PhpIncludeInspection */
+            require_once $classFileWithinPhar;
+            return true;
+        }
+
+        //Try to load a custom Task or Class. Notice that the path is absolute to CWD
+        $classFileOutsidePhar = getcwd() . '/.mage/tasks' . $postfix;
+        if ($this->isReadable($classFileOutsidePhar)) {
+            /** @noinspection PhpIncludeInspection */
+            require_once $classFileOutsidePhar;
+            return true;
+        }
+
+        return false;
     }
 
     /**
-     * Loads a User's Tasks
-     * @param string $taskName
+     * Checks if a file can be read.
+     * @param string $filePath
+     * @return boolean
      */
-    public static function loadUserTask($taskName)
+    public function isReadable($filePath)
     {
-        $classFile = '.mage/tasks/' . ucfirst($taskName) . '.php';
-        require_once $classFile;
+        return is_readable($filePath);
     }
 
 }

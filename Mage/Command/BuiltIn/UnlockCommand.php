@@ -22,18 +22,20 @@ use Mage\Console;
 class UnlockCommand
     extends AbstractCommand implements RequiresEnvironment
 {
-	/**
-	 * Unlocks an Environment
-	 * @see \Mage\Command\AbstractCommand::run()
-	 */
+    /**
+     * Unlocks an Environment
+     * @see \Mage\Command\AbstractCommand::run()
+     */
     public function run()
     {
-        $lockFile = '.mage/' . $this->getConfig()->getEnvironment() . '.lock';
+        $lockFile = getcwd() . '/.mage/' . $this->getConfig()->getEnvironment() . '.lock';
         if (file_exists($lockFile)) {
             @unlink($lockFile);
         }
 
         Console::output('Unlocked deployment to <light_purple>' . $this->getConfig()->getEnvironment() . '</light_purple> environment', 1, 2);
+
+        return 0;
     }
 
 }

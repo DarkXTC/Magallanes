@@ -19,15 +19,16 @@ use Mage\Config;
  */
 abstract class AbstractCommand
 {
-	/**
-	 * Instance of the loaded Configuration.
-	 *
-	 * @var \Mage\Config
-	 */
+    /**
+     * Instance of the loaded Configuration.
+     *
+     * @var \Mage\Config
+     */
     protected $config = null;
 
     /**
      * Runs the Command
+     * @return integer exit code
      * @throws \Exception
      */
     public abstract function run();

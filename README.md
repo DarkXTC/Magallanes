@@ -32,6 +32,15 @@ And finally we can use Magallanes from the vendor's bin:
 $ bin/mage version
 ```
 
+### System-wide installation with composer ###
+
+```bash
+$ composer global require "andres-montanez/magallanes=1.0.*"
+```
+
+Make sure you have ~/.composer/vendor/bin/ in your path.
+You can now use Magallanes by using the ````mage```` command.
+
 ### Can you give me some examples/ideas? ###
 **Sure!**
 Suppose you have a checkout of your app and you have to deploy it to four servers;
@@ -57,3 +66,6 @@ You can read the whole source code (naaah!); or checkout the documentation at: h
 
 
 Enjoy your magic trip with **Magallanes** to the land of the easily deployable apps!!
+
+### "develop" branch ###
+Please, all pull request now must be on the develop branch. Thanks!

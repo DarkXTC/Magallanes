@@ -28,16 +28,19 @@ class RollbackCommand extends AbstractCommand implements RequiresEnvironment
      */
     public function run()
     {
+        $exitCode = 450;
         $releaseId = $this->getConfig()->getArgument(1);
+
         if (!is_numeric($releaseId)) {
             Console::output('<red>This release is mandatory.</red>', 1, 2);
-            return false;
+            return 451;
         }
 
-        $lockFile = '.mage/' . $this->getConfig()->getEnvironment() . '.lock';
-        if (file_exists($lockFile) && ($subcommand == 'rollback')) {
+        $lockFile = getcwd() . '/.mage/' . $this->getConfig()->getEnvironment() . '.lock';
+        if (file_exists($lockFile)) {
             Console::output('<red>This environment is locked!</red>', 1, 2);
-            return null;
+            echo file_get_contents($lockFile);
+            return 20;
         }
 
         // Run Tasks for Deployment
@@ -47,16 +50,21 @@ class RollbackCommand extends AbstractCommand implements RequiresEnvironment
             Console::output('<light_purple>Warning!</light_purple> <dark_gray>No hosts defined, unable to get releases.</dark_gray>', 1, 3);
 
         } else {
+            $result = true;
             foreach ($hosts as $host) {
                 $this->getConfig()->setHost($host);
 
+                $this->getConfig()->setReleaseId($releaseId);
                 $task = Factory::get('releases/rollback', $this->getConfig());
                 $task->init();
-                $task->setRelease($releaseId);
-                $result = $task->run();
+                $result = $task->run() && $result;
+            }
+
+            if ($result) {
+                $exitCode = 0;
             }
         }
 
-        return $result;
+        return $exitCode;
     }
 }
